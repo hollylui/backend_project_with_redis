@@ -1,35 +1,64 @@
 const axios = require("axios");
 const cherrio = require("cheerio");
-const newsHelper = require("../../helpers/news/newsHelper");
+// const TheGuardianModel = require("../../models/news/TheGuardianModel");
 
-let theGuardianArticles = [];
+//! redis ---------------------------------------------
+const redis = require("redis");
+const client = redis.createClient();
+let allArticles = [];
 
-//! cheerio funciton ------------------------------------
-const cheerioFn = async () => {
-  const newsURL = "https://www.theguardian.com/uk-news";
-  const { data } = await axios.get(newsURL);
-  const $ = cherrio.load(data, { scriptingEnabled: false });
-  const newsItems = $(".fc-container__inner");
+//! Get Informaion
 
-  newsItems.each(async (idx, el) => {
-    title = $(el).find(".fc-item__header").find("h3").text();
-    url = $(el).find(".fc-item__header").find("h3").find("a").attr("href");
-    imgPath = $(el)
-      .find(".fc-item__media-wrapper div")
-      .find("picture img")
-      .attr("src");
+const DEFAULT_PEXPIRATION = 3600;
+const sliceIndex = 8;
 
-    const articleContent = {
-      title: title,
-      url: url,
-      img: imgPath,
-    };
-
-    theGuardianArticles.push(articleContent);
-  });
-};
-
-//! Get information ------------------------------------
 exports.list = async (req, res) => {
-  newsHelper("theGuardian", res, theGuardianArticles, cheerioFn);
+  client.on("error", (err) => console.log("Redis Client Error", err));
+  await client.connect();
+  try {
+    let value = await client.get("theGuardian");
+
+    if (value != null) {
+      await client.quit();
+      return res.status(200).json(JSON.parse(value));
+    } else {
+      const newsURL = "https://www.theguardian.com/uk-news";
+      const { data } = await axios.get(newsURL);
+      const $ = cherrio.load(data, { scriptingEnabled: false });
+      const newsItems = $(".fc-container__inner");
+
+      newsItems.each(async (idx, el) => {
+        title = $(el).find(".fc-item__header").find("h3").text();
+        url = $(el).find(".fc-item__header").find("h3").find("a").attr("href");
+        imgPath = $(el)
+          .find(".fc-item__media-wrapper div")
+          .find("picture img")
+          .attr("src");
+
+        const articleContent = {
+          id: idx,
+          title: title,
+          url: url,
+          img: imgPath,
+        };
+
+        allArticles.push(articleContent);
+      });
+
+      const filterArticles = allArticles.filter(
+        (article) => article["img"] != undefined
+      );
+      const sliceArticles = filterArticles.slice(0, sliceIndex);
+
+      await client.setEx(
+        "theGuardian",
+        DEFAULT_PEXPIRATION,
+        JSON.stringify(sliceArticles)
+      );
+      await client.quit();
+      return res.status(200).json(sliceArticles);
+    }
+  } catch (err) {
+    console.log(err.message);
+  }
 };
