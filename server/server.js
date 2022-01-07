@@ -7,9 +7,6 @@ const passport = require("passport");
 const cookieParser = require("cookie-parser");
 const mongoose = require("mongoose");
 
-const redis = require("redis");
-const client = redis.createClient();
-
 const usersRoute = require("./routes/users/usersRoute");
 const newsRoute = require("./routes/news/newsRoute");
 
